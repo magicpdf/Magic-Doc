@@ -1,0 +1,48 @@
+name: Magic doc benchmark
+on:
+  push:
+    branches:
+      - "master"
+    paths-ignore:
+      - "cmds/**"
+      - "**.md"
+  pull_request:
+    branches:
+      - "master"
+    paths-ignore:
+      - "cmds/**"
+      - "**.md"
+  workflow_dispatch:
+jobs:
+  magic-doc-test:
+    runs-on: pdf
+    timeout-minutes: 180
+    strategy:
+      fail-fast: true
+
+    steps:
+    - name: config-net
+      run: |
+        export http_proxy=http://bigdata_open_proxy:H89k5qwQRDYfz@10.140.90.20:10811
+        export https_proxy=http://bigdata_open_proxy:H89k5qwQRDYfz@10.140.90.20:10811
+    - name: pull code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 2
+    - name: check-requirements
+      run: |
+        changed_files=$(git diff --name-only -r HEAD~1 HEAD)
+        echo $changed_files
+        if [[ $changed_files =~ "requirements.txt" ]]; then
+          pip install -r requirements.txt
+        fi
+    - name: install dependencies
+      run: |
+        sudo su -
+        yum install libreoffice
+        pip install fairy-doc[cpu]
+    - name: get-doc-benchmark-result
+      run: |
+        echo "start test"
+        cd tools && python benchmark.py
+  
