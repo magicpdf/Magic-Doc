@@ -25,6 +25,8 @@ jobs:
     steps:
     - name: config-net
       run: |
+        conda init
+        conda activate magicdoc
         export http_proxy=http://bigdata_open_proxy:H89k5qwQRDYfz@10.140.90.20:10811
         export https_proxy=http://bigdata_open_proxy:H89k5qwQRDYfz@10.140.90.20:10811
     - name: doc cli
