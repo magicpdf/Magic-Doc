@@ -2,13 +2,13 @@ name: Magic doc benchmark
 on:
   push:
     branches:
-      - "master"
+      - "main"
     paths-ignore:
       - "cmds/**"
       - "**.md"
   pull_request:
     branches:
-      - "master"
+      - "main"
     paths-ignore:
       - "cmds/**"
       - "**.md"
