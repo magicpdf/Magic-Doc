@@ -1,4 +1,6 @@
-name: Magic doc benchmark
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: doc-ci
 on:
   push:
     branches:
@@ -14,22 +16,22 @@ on:
       - "**.md"
   workflow_dispatch:
 jobs:
-  magic-doc-test:
+  cli-test:
     runs-on: doc
-    timeout-minutes: 180
+    timeout-minutes: 40
     strategy:
       fail-fast: true
 
     steps:
     - name: config-net
       run: |
-        conda activate magicdoc
         export http_proxy=http://bigdata_open_proxy:H89k5qwQRDYfz@10.140.90.20:10811
         export https_proxy=http://bigdata_open_proxy:H89k5qwQRDYfz@10.140.90.20:10811
-    - name: pull code
+    - name: doc cli
       uses: actions/checkout@v3
       with:
         fetch-depth: 2
+      
     - name: check-requirements
       run: |
         changed_files=$(git diff --name-only -r HEAD~1 HEAD)
@@ -37,13 +39,14 @@ jobs:
         if [[ $changed_files =~ "requirements.txt" ]]; then
           pip install -r requirements.txt
         fi
-    - name: install dependencies
+
+    - name: config-net-reset
       run: |
-        sudo su -
-        yum install libreoffice
-        pip install fairy-doc[cpu]
-    - name: get-doc-benchmark-result
+        export http_proxy=""
+        export https_proxy=""
+    - name: test_cli
       run: |
-        echo "start test"
-        cd tools && python benchmark.py
-  
+        echo $GITHUB_WORKSPACE
+        cd $GITHUB_WORKSPACE && export PYTHONPATH=. && pytest -s -v tests/test_unit.py
+        cd $GITHUB_WORKSPACE &&  pytest -s -v test/test_cli/test_cli.py
+                                                                                                                            
