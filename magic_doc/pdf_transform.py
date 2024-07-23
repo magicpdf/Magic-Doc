@@ -6,7 +6,7 @@ from functools import partial
 import boto3
 from botocore.client import Config
 from func_timeout import FunctionTimedOut, func_timeout
-from loguru import logger
+# from loguru import logger
 from magic_pdf.libs.path_utils import (
     remove_non_official_s3_args,
 )
@@ -18,12 +18,15 @@ from magic_doc.conv.base import BaseConv
 from magic_doc.conv.doc_antiword import Doc as Doc_antiword
 from magic_doc.conv.doc_libreoffice import Doc as Doc_libreoffice
 from magic_doc.conv.docx_xml_parse import Docx
-from magic_doc.conv.pdf import Pdf as fastPdf
+from magic_doc.conv.pdf import Pdf as fastTextPdf
+from magic_doc.conv.pdf_pp_structurev2 import Pdf as liteOcrPdf
 from magic_doc.conv.pdf_magicpdf import Pdf as fullPdf
 from magic_doc.conv.ppt_libreoffice import Ppt
 from magic_doc.conv.pptx_python_pptx import Pptx
 from magic_doc.progress.filepupdator import FileBaseProgressUpdator
 from magic_doc.utils import is_digital
+from magic_doc.conv.base import ParseFailed
+from magic_doc.common.default_config import DEFAULT_CONFIG, PdfFastParseMethod
 
 
 class ParsePDFType:
@@ -53,9 +56,6 @@ class DocConverter(object):
         parse_pdf_type=ParsePDFType.FULL,
         conv_timeout=60,
     ):
-        """
-        初始化一次，多次调用convert方法。避免模型加载和构造s3client的性能开销。
-        """
         self.__s3cfg = s3_config
         if self.__s3cfg:
             self.__s3cli = boto3.client(
@@ -69,15 +69,7 @@ class DocConverter(object):
             )
         self.parse_pdf_type = parse_pdf_type
         self.__temp_dir = temp_dir
-        self.__conv_timeout = conv_timeout  # 转换超时时间，单位秒
-
-        # if not self.__model_equation_recog_path or not self.__model_equation_detect_path or not self.__model_layout_path:
-        #     raise ConvException("Model path not found in environment variables: %s, %s, %s" % (MODEL_EQUATION_RECOG_PATH_VAR, MODEL_EQUATION_DETECT_PATH_VAR, MODEL_LAYOUT_PATH_VAR))
-        # else:
-        #     pass # TODO 初始化模型
-
-        ############################
-        # 初始化转换器，每个只实例化一次
+        self.__conv_timeout = conv_timeout
         self.__init_conv()
 
     def __init_conv(self):
@@ -89,7 +81,12 @@ class DocConverter(object):
             self.doc_conv = Doc_libreoffice()
         self.docx_conv = Docx()
         self.full_pdf_conv = fullPdf()
-        self.fast_pdf_conv = fastPdf()
+
+        if DEFAULT_CONFIG["pdf"]["fast"]["parsemethod"] == PdfFastParseMethod.AUTO:
+            self.fast_textpdf_conv = fastTextPdf(allowed_failure=False)
+        else:
+            self.fast_textpdf_conv = fastTextPdf()
+        self.lite_ocrpdf_conv = liteOcrPdf()
         self.ppt_conv = Ppt()
         self.pptx_conv = Pptx()
 
@@ -113,8 +110,18 @@ class DocConverter(object):
         elif lower_case_path.endswith(".pdf"):
             # %PDF
             if check_magic_header(b"%PDF"):
-                if self.parse_pdf_type == ParsePDFType.FAST and is_digital(doc_bytes):
-                    return self.fast_pdf_conv
+                if self.parse_pdf_type == ParsePDFType.FAST:
+                    if DEFAULT_CONFIG["pdf"]["fast"]["parsemethod"] == PdfFastParseMethod.AUTO:
+                        if is_digital(doc_bytes):
+                            return self.fast_textpdf_conv
+                        else:
+                            return self.lite_ocrpdf_conv
+                    elif DEFAULT_CONFIG["pdf"]["fast"]["parsemethod"] == PdfFastParseMethod.FAST:
+                        return self.fast_textpdf_conv
+                    elif DEFAULT_CONFIG["pdf"]["fast"]["parsemethod"] == PdfFastParseMethod.LITEOCR:
+                        return self.lite_ocrpdf_conv
+                    else:
+                        return self.lite_ocrpdf_conv
                 else:
                     return self.full_pdf_conv
 
@@ -143,6 +150,9 @@ class DocConverter(object):
                 content_bytes = fin.read()
                 return content_bytes
 
+    def get_raw_file_content(self, doc_path:str) -> bytes:
+        return self.__read_file_as_bytes(doc_path)
+
     def _timeout_convert(
         self,
         byte_content: bytes,
@@ -169,15 +179,17 @@ class DocConverter(object):
             cost_time = round(end_time - start_time, 3)
 
         except FunctionTimedOut as e1:
-            logger.exception(e1)
+            # logger.exception(e1)
             raise ConvException("Convert timeout.")
-        except Exception as e2:
-            logger.exception(e2)
-            raise ConvException("Convert failed: %s" % str(e2))
+        except ParseFailed as e2:
+            raise e2
+        except Exception as e3:
+            # logger.exception(e2)
+            raise ConvException("Convert failed: %s" % str(e3))
 
         return res, cost_time
 
-    def convert(self, doc_path: str, progress_file_path: str, conv_timeout=None):
+    def convert(self, doc_path: str, progress_file_path: str = "/tmp/magic_doc_convert_progress.txt", conv_timeout=None):
         """
         在线快速解析
         doc_path: str, path to the document, support local file path and s3 path.
@@ -191,7 +203,7 @@ class DocConverter(object):
         )
 
     def convert_to_mid_result(
-        self, doc_path: str, progress_file_path: str, conv_timeout=None
+        self, doc_path: str, progress_file_path: str = "/tmp/magic_doc_convert_progress.txt", conv_timeout=None
     ):
         """
         在线快速解析
